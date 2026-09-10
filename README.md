@@ -40,11 +40,21 @@ git push -u origin main
 
 (Create the empty repo on GitHub first, then run the commands above.)
 
-## Step 2 — Create a Postgres database on Render
+## Step 2 — Create a free database on Neon (not Render Postgres)
 
-1. Go to [render.com](https://render.com) → **New** → **PostgreSQL**
-2. Give it any name (e.g. `kushaagra-comments-db`) → free tier is fine to start
-3. Once created, copy the **Internal Database URL** (you'll need it in Step 3)
+Render's own free Postgres expires after 30 days and gets deleted — not
+suitable for real comments people leave over time. **Neon** is a free
+Postgres host with no 30-day kill switch, so use that instead:
+
+1. Go to [neon.tech](https://neon.tech) → sign up (GitHub login is fastest)
+2. Create a new project (any name, e.g. `kushaagra-comments`)
+3. On the project dashboard, find the **Connection string** — it looks like
+   `postgresql://user:password@ep-xxxx.neon.tech/dbname?sslmode=require`
+4. Copy that full string — you'll paste it into Render as `DATABASE_URL` in
+   Step 3
+
+(Supabase is a fine alternative if you prefer it — same idea, just copy its
+connection string instead. `server.js` doesn't care which one you use.)
 
 ## Step 3 — Deploy the backend as a Web Service
 
@@ -55,7 +65,7 @@ git push -u origin main
 5. Add these **Environment Variables**:
    | Key | Value |
    |---|---|
-   | `DATABASE_URL` | the Internal Database URL from Step 2 |
+   | `DATABASE_URL` | the Neon connection string from Step 2 |
    | `JWT_SECRET` | any long random string (e.g. generate one at [randomkeygen.com](https://randomkeygen.com)) |
    | `ADMIN_PASSWORD` | a password only you know — this logs you into `/admin` |
 6. Deploy. Render gives you a URL like `https://kushaagra-comments-api.onrender.com`
