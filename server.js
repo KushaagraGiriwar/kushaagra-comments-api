@@ -21,10 +21,11 @@ const { Pool } = require('pg');
 const app = express();
 app.use(express.json());
 
-// ---- CORS: only allow your actual site to call this API ----
+// ---- CORS: only allow your actual site (and the admin panel's own origin) to call this API ----
 // Add any other origins you need (e.g. a custom domain later) to this list.
 const ALLOWED_ORIGINS = [
   'https://kushaagragiriwar.github.io',
+  'https://kushaagra-comments-api.onrender.com', // the admin panel is served from here too
 ];
 app.use(cors({
   origin: function (origin, callback) {
@@ -35,6 +36,15 @@ app.use(cors({
     return callback(new Error('Not allowed by CORS'));
   },
 }));
+
+// CORS errors currently crash into a generic 500 HTML page, which breaks
+// the admin login's fetch/JSON parsing. Return a clean JSON error instead.
+app.use((err, req, res, next) => {
+  if (err && err.message === 'Not allowed by CORS') {
+    return res.status(403).json({ error: 'Not allowed by CORS' });
+  }
+  next(err);
+});
 
 // ---- Database ----
 // Works with Neon, Supabase, or any hosted Postgres that requires SSL
