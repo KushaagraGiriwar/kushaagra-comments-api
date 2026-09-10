@@ -37,11 +37,11 @@ app.use(cors({
 }));
 
 // ---- Database ----
+// Works with Neon, Supabase, or any hosted Postgres that requires SSL
+// (which is all of them) — this doesn't need to know which provider you used.
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('render.com')
-    ? { rejectUnauthorized: false }
-    : undefined,
+  ssl: { rejectUnauthorized: false },
 });
 
 async function initDb() {
