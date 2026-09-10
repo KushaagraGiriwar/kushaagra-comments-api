@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Comment Admin — Kushaagra Giriwar</title>
+<style>
+  :root {
+    --bg: #12100e;
+    --card: #1c1917;
+    --border: #33302c;
+    --text: #f1ede7;
+    --muted: #a89f93;
+    --accent: #d4af37;
+    --danger: #c0392b;
+    --success: #3a7d44;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 2rem 1rem;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin-bottom: 1.5rem; }
+  #login-box, #panel { display: none; }
+  input[type="password"], input[type="text"] {
+    width: 100%;
+    padding: 0.7rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text);
+    margin-bottom: 0.8rem;
+    font-size: 1rem;
+  }
+  button {
+    padding: 0.6rem 1.1rem;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+  .btn-primary { background: var(--accent); color: #1c1917; }
+  .btn-approve { background: var(--success); color: white; }
+  .btn-delete { background: var(--danger); color: white; }
+  .btn-row { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
+  .comment-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+  .comment-meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.4rem; }
+  .status-pill {
+    display: inline-block;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: 0.5rem;
+  }
+  .status-pending { background: #4a3b1a; color: #e8c468; }
+  .status-approved { background: #1f3d24; color: #7fd992; }
+  #error { color: #ff8a80; margin-bottom: 0.8rem; min-height: 1.2rem; }
+  #logout { background: transparent; color: var(--muted); text-decoration: underline; padding: 0; margin-bottom: 1.5rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Comment Moderation</h1>
+
+  <div id="login-box">
+    <input type="password" id="password" placeholder="Admin password" />
+    <button class="btn-primary" onclick="login()">Log in</button>
+    <div id="error"></div>
+  </div>
+
+  <div id="panel">
+    <button id="logout" onclick="logout()">Log out</button>
+    <div id="list">Loading comments...</div>
+  </div>
+</div>
+
+<script>
+  // Same-origin admin page, so the API base is just the current origin.
+  const API_BASE = window.location.origin;
+  let token = localStorage.getItem('admin_token') || null;
+
+  function showPanel() {
+    document.getElementById('login-box').style.display = 'none';
+    document.getElementById('panel').style.display = 'block';
+    loadComments();
+  }
+
+  function showLogin() {
+    document.getElementById('login-box').style.display = 'block';
+    document.getElementById('panel').style.display = 'none';
+  }
+
+  async function login() {
+    const password = document.getElementById('password').value;
+    const errorEl = document.getElementById('error');
+    errorEl.textContent = '';
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        errorEl.textContent = data.error || 'Login failed.';
+        return;
+      }
+      token = data.token;
+      localStorage.setItem('admin_token', token);
+      showPanel();
+    } catch (err) {
+      errorEl.textContent = 'Could not reach the server.';
+    }
+  }
+
+  function logout() {
+    token = null;
+    localStorage.removeItem('admin_token');
+    showLogin();
+  }
+
+  async function loadComments() {
+    const listEl = document.getElementById('list');
+    listEl.textContent = 'Loading comments...';
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/comments`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        logout();
+        return;
+      }
+      const comments = await res.json();
+      if (comments.length === 0) {
+        listEl.innerHTML = '<p>No comments yet.</p>';
+        return;
+      }
+      listEl.innerHTML = comments.map(renderComment).join('');
+    } catch (err) {
+      listEl.textContent = 'Could not load comments.';
+    }
+  }
+
+  function renderComment(c) {
+    const date = new Date(c.created_at).toLocaleString();
+    const statusClass = c.status === 'approved' ? 'status-approved' : 'status-pending';
+    return `
+      <div class="comment-card">
+        <div class="comment-meta">
+          <strong>${escapeHtml(c.name)}</strong> · ${escapeHtml(c.contact)} · ${date}
+          <span class="status-pill ${statusClass}">${c.status}</span>
+        </div>
+        <div>${escapeHtml(c.message)}</div>
+        <div class="btn-row">
+          ${c.status !== 'approved' ? `<button class="btn-approve" onclick="approve(${c.id})">Approve</button>` : ''}
+          <button class="btn-delete" onclick="remove(${c.id})">Delete</button>
+        </div>
+      </div>
+    `;
+  }
+
+  async function approve(id) {
+    await fetch(`${API_BASE}/api/admin/comments/${id}/approve`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    loadComments();
+  }
+
+  async function remove(id) {
+    if (!confirm('Delete this comment permanently?')) return;
+    await fetch(`${API_BASE}/api/admin/comments/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    loadComments();
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // Init
+  if (token) {
+    showPanel();
+  } else {
+    showLogin();
+  }
+</script>
+</body>
+</html>
