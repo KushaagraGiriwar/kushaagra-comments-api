@@ -70,9 +70,12 @@ async function initDb() {
       id SERIAL PRIMARY KEY,
       url TEXT NOT NULL,
       alt TEXT NOT NULL DEFAULT '',
+      featured BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+  // Safe to run even if the column already exists from a previous deploy.
+  await pool.query(`ALTER TABLE photos ADD COLUMN IF NOT EXISTS featured BOOLEAN NOT NULL DEFAULT FALSE;`);
   // One-time seed: if the photos table is empty, populate it with the
   // photos that were already hardcoded into the site, so switching to the
   // dynamic system doesn't make the gallery empty on first deploy.
@@ -193,7 +196,7 @@ app.get('/api/comments', async (req, res) => {
 app.get('/api/photos', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, url, alt, created_at FROM photos ORDER BY created_at ASC`
+      `SELECT id, url, alt, featured, created_at FROM photos ORDER BY created_at ASC`
     );
     res.json(result.rows);
   } catch (err) {
@@ -280,6 +283,24 @@ app.delete('/api/admin/photos/:id', requireAdmin, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Could not delete photo.' });
+  }
+});
+
+// Toggle whether a photo is featured in the homepage hero slideshow
+app.patch('/api/admin/photos/:id/featured', requireAdmin, async (req, res) => {
+  const { featured } = req.body || {};
+  try {
+    const result = await pool.query(
+      'UPDATE photos SET featured = $1 WHERE id = $2 RETURNING id, url, alt, featured, created_at',
+      [!!featured, req.params.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Photo not found.' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Could not update photo.' });
   }
 });
 
