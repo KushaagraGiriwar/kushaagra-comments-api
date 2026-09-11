@@ -213,7 +213,7 @@ app.get('/api/photos', async (req, res) => {
 // considered gone. This resets naturally whenever the free-tier server
 // restarts/sleeps — that's fine, the count just starts fresh.
 const activeVisitors = new Map(); // visitorId -> last seen timestamp (ms)
-const VISITOR_TIMEOUT_MS = 25000;
+const VISITOR_TIMEOUT_MS = 12000;
 
 function pruneStaleVisitors() {
   const cutoff = Date.now() - VISITOR_TIMEOUT_MS;
@@ -221,7 +221,7 @@ function pruneStaleVisitors() {
     if (lastSeen < cutoff) activeVisitors.delete(id);
   }
 }
-setInterval(pruneStaleVisitors, 15000);
+setInterval(pruneStaleVisitors, 5000);
 
 app.post('/api/visitors/heartbeat', (req, res) => {
   const { visitorId } = req.body || {};
