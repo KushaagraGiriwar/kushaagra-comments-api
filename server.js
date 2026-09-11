@@ -96,6 +96,68 @@ async function initDb() {
     }
     console.log('Seeded photos table with existing photos.');
   }
+
+  // ---- Videos table ----
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS videos (
+      id SERIAL PRIMARY KEY,
+      category TEXT NOT NULL,
+      drive_url TEXT NOT NULL,
+      title TEXT NOT NULL,
+      venue TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  const videoCount = await pool.query('SELECT COUNT(*)::int AS count FROM videos');
+  if (videoCount.rows[0].count === 0) {
+    const seedVideos = [
+      ['solo', '1KbKGiDIx1dN0Qx34uIpK5eJPkXZ-jNQB', 'ThePianoMan (TPM)', 'Safdarjang'],
+      ['solo', '17-Kq4uuI2NT5XQwrxSE5kyAkI1TjJliW', 'Saiyaara', '@ DTU'],
+      ['solo', '1zSn32FVcwqmvP1MT451zJePR5bkicsTY', 'Dancing Numbers', '@ Breath'],
+      ['solo', '1BIsMvRv0ZGJBf2bft4dLW5vD1B3CPwWH', 'Khamoshiyan', '@ Social, Civil Lines'],
+      ['solo', '1Lc6ku2zLyBrTBuFd81kRg_xXzAtW0oKZ', 'Kaise Hua', '@ CVS'],
+      ['solo', '1rsXGdek_YjhLWAnn1yH4DUcNY3DMV9gr', 'Retro Mashup', '@ FLOS'],
+      ['duo', '17rvMxsr93D-lo15WL6pHoj1mvE7SkqcU', 'Ye Tune Kya Kiya', '@ Rajdhani College'],
+      ['duo', '1-TVTjlxA0THgGe0hXRpgM2FM3kKNbnJh', 'O O Jaane Jaana', '@ Social'],
+      ['duo', '12OYTr4QCdkrKAoz2h4p1k1oSkwTlCu4g', 'Pehli Nazar Mein', '@ Miranda House'],
+      ['duo', '1W6jUl0k6v35twLGKUR8V5QyOo6BrlVZ_', 'Chura Liya Hai Tumne Jo Dil Ko', '@ Miranda House'],
+      ['duo', '1bzktVhWWuoF5FYFk3k3Pz8IAQgrblKQz', 'Ajeeb Dastan', '@ Mazi Cafe'],
+      ['duo', '1Wv9CzikuCdVezXZqA0hDA21cJH5e2QKQ', 'Sahiba', 'Duo performance'],
+      ['band', '1q8zeNlI2udxMOenvhGZXV2WeEuEZLzIg', 'Khuda Jaane', 'Full band, live'],
+      ['band', '1Di5dQEhMygiwkM4uH08nChrHEPRrd-IF', 'Zara Sa', 'Full band, live'],
+      ['band', '1lQS9Migu11L7lPJdjoX4D3eyas63gCvw', 'Ae Dil Hai Mushkil', 'Full band, live'],
+      ['band', '1_aZk2Vka5CG3Lt9HiCQ9uIT4nt5S0j-l', 'Yeh Fitoor Mera', 'Full band, live'],
+      ['band', '1ntExhAMFSj6bASEhc0PaKvm94Zlriomf', 'Jo Bheji Thi Dua', 'Full band, live'],
+      ['band', '1P-fnJPFzjsHI5UNzPWblwwiL_xuBQf_4', 'Ud-da Punjab', 'Full band, live'],
+    ];
+    for (const [category, fileId, title, venue] of seedVideos) {
+      const driveUrl = `https://drive.google.com/file/d/${fileId}/preview`;
+      await pool.query(
+        'INSERT INTO videos (category, drive_url, title, venue) VALUES ($1, $2, $3, $4)',
+        [category, driveUrl, title, venue]
+      );
+    }
+    console.log('Seeded videos table with existing videos.');
+  }
+
+  // ---- Editable site content (bio, fees) ----
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS site_content (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL DEFAULT ''
+    );
+  `);
+
+  // ---- Booked dates (for the availability calendar) ----
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS booked_dates (
+      id SERIAL PRIMARY KEY,
+      event_date DATE NOT NULL UNIQUE,
+      note TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
   console.log('Database ready.');
 }
 
@@ -112,6 +174,20 @@ function normalizePhotoUrl(input) {
     return `https://drive.google.com/thumbnail?id=${input.trim()}&sz=w1000`;
   }
   // Otherwise assume it's already a usable direct image URL
+  return input.trim();
+}
+
+// Same idea as normalizePhotoUrl, but for videos: returns a Drive embeddable
+// /preview URL instead of a thumbnail image URL.
+function normalizeDriveVideoUrl(input) {
+  const driveIdMatch = input.match(/\/d\/([a-zA-Z0-9_-]+)/) || input.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (driveIdMatch) {
+    return `https://drive.google.com/file/d/${driveIdMatch[1]}/preview`;
+  }
+  if (/^[a-zA-Z0-9_-]{15,}$/.test(input.trim())) {
+    return `https://drive.google.com/file/d/${input.trim()}/preview`;
+  }
+  // Otherwise assume it's already a usable embed URL
   return input.trim();
 }
 
@@ -202,6 +278,45 @@ app.get('/api/photos', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Could not load photos.' });
+  }
+});
+
+// Get all videos (public — used to render the Solo/Duo/Band tabs)
+app.get('/api/videos', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, category, drive_url, title, venue, created_at FROM videos ORDER BY category ASC, created_at ASC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Could not load videos.' });
+  }
+});
+
+// Get editable site content (bio paragraphs, fee prices/notes) as a flat object
+app.get('/api/content', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT key, value FROM site_content');
+    const content = {};
+    result.rows.forEach((row) => { content[row.key] = row.value; });
+    res.json(content);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Could not load site content.' });
+  }
+});
+
+// Get booked dates (public — used to render the availability calendar)
+app.get('/api/booked-dates', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, event_date, note FROM booked_dates ORDER BY event_date ASC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Could not load booked dates.' });
   }
 });
 
@@ -334,6 +449,90 @@ app.patch('/api/admin/photos/:id/featured', requireAdmin, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Could not update photo.' });
+  }
+});
+
+// ---- Admin: videos ----
+app.post('/api/admin/videos', requireAdmin, async (req, res) => {
+  const { category, url, title, venue } = req.body || {};
+  if (!category || !['solo', 'duo', 'band'].includes(category)) {
+    return res.status(400).json({ error: "Category must be one of: solo, duo, band." });
+  }
+  if (!url || !title) {
+    return res.status(400).json({ error: 'A video link and title are required.' });
+  }
+  try {
+    const driveUrl = normalizeDriveVideoUrl(url);
+    const result = await pool.query(
+      'INSERT INTO videos (category, drive_url, title, venue) VALUES ($1, $2, $3, $4) RETURNING id, category, drive_url, title, venue, created_at',
+      [category, driveUrl, title.trim(), (venue || '').trim()]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Could not add video.' });
+  }
+});
+
+app.delete('/api/admin/videos/:id', requireAdmin, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM videos WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Could not delete video.' });
+  }
+});
+
+// ---- Admin: editable site content (bio, fees) ----
+app.put('/api/admin/content', requireAdmin, async (req, res) => {
+  const updates = req.body || {};
+  const keys = Object.keys(updates);
+  if (keys.length === 0) {
+    return res.status(400).json({ error: 'No content fields provided.' });
+  }
+  try {
+    for (const key of keys) {
+      await pool.query(
+        `INSERT INTO site_content (key, value) VALUES ($1, $2)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [key, String(updates[key] ?? '')]
+      );
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Could not save content.' });
+  }
+});
+
+// ---- Admin: booked dates ----
+app.post('/api/admin/booked-dates', requireAdmin, async (req, res) => {
+  const { date, note } = req.body || {};
+  if (!date) {
+    return res.status(400).json({ error: 'A date is required.' });
+  }
+  try {
+    const result = await pool.query(
+      `INSERT INTO booked_dates (event_date, note) VALUES ($1, $2)
+       ON CONFLICT (event_date) DO UPDATE SET note = EXCLUDED.note
+       RETURNING id, event_date, note`,
+      [date, (note || '').trim()]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Could not add booked date.' });
+  }
+});
+
+app.delete('/api/admin/booked-dates/:id', requireAdmin, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM booked_dates WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Could not delete booked date.' });
   }
 });
 
