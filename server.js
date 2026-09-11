@@ -206,6 +206,39 @@ app.get('/api/photos', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// LIVE VISITOR COUNTER (in-memory — no database needed for this)
+// ---------------------------------------------------------------------------
+// Each visitor's browser sends a "heartbeat" every ~10s with a random ID
+// generated for their tab. Anyone who hasn't pinged in the last 25s is
+// considered gone. This resets naturally whenever the free-tier server
+// restarts/sleeps — that's fine, the count just starts fresh.
+const activeVisitors = new Map(); // visitorId -> last seen timestamp (ms)
+const VISITOR_TIMEOUT_MS = 25000;
+
+function pruneStaleVisitors() {
+  const cutoff = Date.now() - VISITOR_TIMEOUT_MS;
+  for (const [id, lastSeen] of activeVisitors) {
+    if (lastSeen < cutoff) activeVisitors.delete(id);
+  }
+}
+setInterval(pruneStaleVisitors, 15000);
+
+app.post('/api/visitors/heartbeat', (req, res) => {
+  const { visitorId } = req.body || {};
+  if (!visitorId || typeof visitorId !== 'string' || visitorId.length > 100) {
+    return res.status(400).json({ error: 'Missing or invalid visitorId.' });
+  }
+  activeVisitors.set(visitorId, Date.now());
+  pruneStaleVisitors();
+  res.json({ count: activeVisitors.size });
+});
+
+app.get('/api/visitors/count', (req, res) => {
+  pruneStaleVisitors();
+  res.json({ count: activeVisitors.size });
+});
+
+// ---------------------------------------------------------------------------
 // ADMIN ROUTES
 // ---------------------------------------------------------------------------
 
