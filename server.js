@@ -154,9 +154,14 @@ async function initDb() {
       id SERIAL PRIMARY KEY,
       event_date DATE NOT NULL UNIQUE,
       note TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL DEFAULT 'booked',
+      price TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+  // Safe to run even if these columns already exist from a previous deploy.
+  await pool.query(`ALTER TABLE booked_dates ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'booked';`);
+  await pool.query(`ALTER TABLE booked_dates ADD COLUMN IF NOT EXISTS price TEXT;`);
 
   console.log('Database ready.');
 }
@@ -311,7 +316,7 @@ app.get('/api/content', async (req, res) => {
 app.get('/api/booked-dates', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, event_date, note FROM booked_dates ORDER BY event_date ASC`
+      `SELECT id, event_date, note, type, price FROM booked_dates ORDER BY event_date ASC`
     );
     res.json(result.rows);
   } catch (err) {
@@ -507,22 +512,37 @@ app.put('/api/admin/content', requireAdmin, async (req, res) => {
 });
 
 // ---- Admin: booked dates ----
+// type is 'booked' (unavailable, no special price) or 'special_price'
+// (available, but a different price than usual — e.g. Diwali, Christmas).
 app.post('/api/admin/booked-dates', requireAdmin, async (req, res) => {
-  const { date, note } = req.body || {};
+  const { date, note, type, price } = req.body || {};
   if (!date) {
     return res.status(400).json({ error: 'A date is required.' });
   }
+  const dayType = type === 'special_price' ? 'special_price' : 'booked';
   try {
     const result = await pool.query(
-      `INSERT INTO booked_dates (event_date, note) VALUES ($1, $2)
-       ON CONFLICT (event_date) DO UPDATE SET note = EXCLUDED.note
-       RETURNING id, event_date, note`,
-      [date, (note || '').trim()]
+      `INSERT INTO booked_dates (event_date, note, type, price) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (event_date) DO UPDATE SET note = EXCLUDED.note, type = EXCLUDED.type, price = EXCLUDED.price
+       RETURNING id, event_date, note, type, price`,
+      [date, (note || '').trim(), dayType, (price || '').trim() || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Could not add booked date.' });
+    res.status(500).json({ error: 'Could not save that date.' });
+  }
+});
+
+// Clear a date back to "available" — works by event_date so the frontend
+// can clear a day without needing to already know its row id.
+app.delete('/api/admin/booked-dates/by-date/:date', requireAdmin, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM booked_dates WHERE event_date = $1', [req.params.date]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Could not clear that date.' });
   }
 });
 
