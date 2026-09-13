@@ -162,6 +162,11 @@ async function initDb() {
   // Safe to run even if these columns already exist from a previous deploy.
   await pool.query(`ALTER TABLE booked_dates ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'booked';`);
   await pool.query(`ALTER TABLE booked_dates ADD COLUMN IF NOT EXISTS price TEXT;`);
+  // Special-pricing days can have a different price per format (solo/duo/band),
+  // not just one flat price — replaces the single "price" column above.
+  await pool.query(`ALTER TABLE booked_dates ADD COLUMN IF NOT EXISTS price_solo TEXT;`);
+  await pool.query(`ALTER TABLE booked_dates ADD COLUMN IF NOT EXISTS price_duo TEXT;`);
+  await pool.query(`ALTER TABLE booked_dates ADD COLUMN IF NOT EXISTS price_band TEXT;`);
 
   console.log('Database ready.');
 }
@@ -316,7 +321,7 @@ app.get('/api/content', async (req, res) => {
 app.get('/api/booked-dates', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, event_date, note, type, price FROM booked_dates ORDER BY event_date ASC`
+      `SELECT id, event_date, note, type, price_solo, price_duo, price_band FROM booked_dates ORDER BY event_date ASC`
     );
     res.json(result.rows);
   } catch (err) {
@@ -513,19 +518,27 @@ app.put('/api/admin/content', requireAdmin, async (req, res) => {
 
 // ---- Admin: booked dates ----
 // type is 'booked' (unavailable, no special price) or 'special_price'
-// (available, but a different price than usual — e.g. Diwali, Christmas).
+// (available, but a different price per format than usual — e.g. Diwali, Christmas).
 app.post('/api/admin/booked-dates', requireAdmin, async (req, res) => {
-  const { date, note, type, price } = req.body || {};
+  const { date, note, type, price_solo, price_duo, price_band } = req.body || {};
   if (!date) {
     return res.status(400).json({ error: 'A date is required.' });
   }
   const dayType = type === 'special_price' ? 'special_price' : 'booked';
   try {
     const result = await pool.query(
-      `INSERT INTO booked_dates (event_date, note, type, price) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (event_date) DO UPDATE SET note = EXCLUDED.note, type = EXCLUDED.type, price = EXCLUDED.price
-       RETURNING id, event_date, note, type, price`,
-      [date, (note || '').trim(), dayType, (price || '').trim() || null]
+      `INSERT INTO booked_dates (event_date, note, type, price_solo, price_duo, price_band)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (event_date) DO UPDATE SET
+         note = EXCLUDED.note, type = EXCLUDED.type,
+         price_solo = EXCLUDED.price_solo, price_duo = EXCLUDED.price_duo, price_band = EXCLUDED.price_band
+       RETURNING id, event_date, note, type, price_solo, price_duo, price_band`,
+      [
+        date, (note || '').trim(), dayType,
+        (price_solo || '').trim() || null,
+        (price_duo || '').trim() || null,
+        (price_band || '').trim() || null,
+      ]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
