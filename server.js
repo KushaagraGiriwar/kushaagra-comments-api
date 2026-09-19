@@ -19,6 +19,9 @@ const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg');
 
 const app = express();
+// Render sits behind a proxy; trust it so rate limiting sees each visitor's real IP
+// (otherwise every visitor shares one IP and the comment limit applies site-wide).
+app.set('trust proxy', 1);
 app.use(express.json());
 
 // ---- CORS: only allow your actual site (and the admin panel's own origin) to call this API ----
@@ -228,6 +231,13 @@ const submitLimiter = rateLimit({
   message: { error: 'Too many comments submitted. Please try again later.' },
 });
 
+// ---- Rate limiting on admin login (blocks password brute-forcing) ----
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // 10 attempts per IP per window
+  message: { error: 'Too many login attempts. Please try again in a few minutes.' },
+});
+
 // ---- Auth middleware for admin routes ----
 function requireAdmin(req, res, next) {
   const authHeader = req.headers.authorization || '';
@@ -379,7 +389,7 @@ app.get('/api/visitors/count', (req, res) => {
 // ADMIN ROUTES
 // ---------------------------------------------------------------------------
 
-app.post('/api/admin/login', (req, res) => {
+app.post('/api/admin/login', loginLimiter, (req, res) => {
   const { password } = req.body || {};
   if (!password || password !== ADMIN_PASSWORD) {
     return res.status(401).json({ error: 'Wrong password.' });
@@ -591,11 +601,25 @@ app.get('/', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-initDb()
-  .then(() => {
-    app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
-  })
-  .catch((err) => {
-    console.error('Failed to initialize database:', err);
-    process.exit(1);
-  });
+
+// Start listening immediately so Render sees the service as up, then set up the
+// database with retries. Previously a slow/sleeping database at boot made the
+// process exit before it ever opened its port ("could not reach server").
+app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
+
+async function initWithRetry(attempt = 1) {
+  try {
+    await initDb();
+  } catch (err) {
+    console.error(`Database init failed (attempt ${attempt}):`, err.message);
+    if (attempt < 10) {
+      setTimeout(() => initWithRetry(attempt + 1), Math.min(5000 * attempt, 30000));
+    } else {
+      console.error('Giving up on database init after 10 attempts.');
+    }
+  }
+}
+initWithRetry();
+
+// Never let a stray async error take the whole server down.
+process.on('unhandledRejection', (err) => console.error('Unhandled rejection:', err));
