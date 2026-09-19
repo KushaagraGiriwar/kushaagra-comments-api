@@ -52,6 +52,18 @@ app.use((err, req, res, next) => {
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
+  connectionTimeoutMillis: 10000, // fail fast instead of hanging if the DB is waking up
+  idleTimeoutMillis: 10000,       // don't hold onto connections Neon might silently close
+  max: 5,                          // small pool is plenty for a low-traffic site
+});
+
+// CRITICAL: without this handler, an idle connection being closed by Neon
+// (which it does automatically to save resources) throws an unhandled error
+// that crashes the entire Node process. This was very likely the actual
+// cause of intermittent "could not reach the server" failures — the server
+// wasn't slow, it was silently crashing and needing a restart.
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle database client (recovered, not crashing):', err.message);
 });
 
 async function initDb() {
