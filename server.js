@@ -28,6 +28,8 @@ app.use(express.json());
 // Add any other origins you need (e.g. a custom domain later) to this list.
 const ALLOWED_ORIGINS = [
   'https://kushaagragiriwar.github.io',
+  'https://kushaagragiriwar.com',      // custom domain
+  'https://www.kushaagragiriwar.com',  // custom domain (www)
   'https://kushaagra-comments-api.onrender.com', // the admin panel is served from here too
 ];
 app.use(cors({
